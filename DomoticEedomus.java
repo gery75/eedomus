@@ -8,6 +8,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.LinkedHashSet;
 import java.util.Iterator;
+import java.util.logging.Logger;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.sql.Connection;
@@ -23,27 +24,31 @@ import org.json.JSONObject;
 
 public class DomoticEedomus
 {
-	final static String 			actCaract		= "periph.caract";
-	final static String 			actHisto		= "periph.history";
-	final static String 			stdFormatDate	= "yyyy-MM-dd HH:mm:ss";
-	static private Connection		cDB				= null;
-	static private JSONObject		jsonConfig		= null;
-	static private LinkedHashSet	setScript		= null;
-	static private String 			urlLocal		= "";
-	static private String 			urlCloud		= "";
-	static private String 			apiUser			= "";
-	static private String 			apiSecret		= "";
-	static private String 			idInternalTemp	= "";
-	static private String 			idExternalTemp	= "";
-	static private String 			idConsoPower	= "";
-	static private String 			configFile		= "config.txt";
-	static private String 			localFile		= "eedomus.sql";
-	static private String 			fileNewLine		= "\n";
+	static final String 			ACT_CARACT		= "periph.caract";
+	static final String 			ACT_HISTO		= "periph.history";
+	static final String 			FORMAT_DATE		= "yyyy-MM-dd HH:mm:ss";
+	static final String 			LAST_CALL		= "lastcall";
+	private static final Logger LOGGER = Logger.getLogger(Thread.currentThread().getStackTrace()[0].getClassName() );
+	private static Connection		cDB				= null;
+	private static JSONObject		jsonConfig		= null;
+	private static LinkedHashSet	setScript		= null;
+	private static String 			urlLocal		= "";
+	private static String 			urlCloud		= "";
+	private static String 			apiUser			= "";
+	private static String 			apiSecret		= "";
+	private static String 			configFile		= "config.txt";
+	private static String 			localFile		= "eedomus.sql";
+	private static String 			fileNewLine		= "\n";
+	
+	private DomoticEedomus()
+	{
+		/* Constructor that can be overriden */
+	}
 	
 	private	static String		formatQuery(boolean cloud, String action, String idPeripherique)
 	{
-		String query	= "";
-		String url		= "";
+		String query;
+		String url;
 		
 		if (cloud)
 			{
@@ -57,61 +62,56 @@ public class DomoticEedomus
 		return query;
 	}
 	
-	public	static String		GetCurrentValue(String idPeriph) throws IOException, JSONException, SQLException, ParseException
+	public	static String		getCurrentValue(String idPeriph) throws IOException, JSONException, SQLException, ParseException
 	{
-		String			query		= "";
+		String			query;
 		String			returnValue	= "";
 		
-		query	=	formatQuery(false, actCaract, idPeriph);
+		query	=	formatQuery(false, ACT_CARACT, idPeriph);
 
 	    JSONObject json = readJsonFromUrl(query);
-	    if (json != null)
-	    {
-	    	if (json.getInt("success") == 1)
-	    	{
-			    JSONObject jsonBody = json.getJSONObject("body");
+	    if ((json != null) &&
+	    		(json.getInt("success") == 1))
+    	{
+		    JSONObject jsonBody = json.getJSONObject("body");
 
-			    returnValue		= jsonBody.getString("last_value");
-	    		
-	    	}
-	    }
+		    returnValue		= jsonBody.getString("last_value");
+    		
+    	}
 	    
 		return returnValue;
 	}
 
-	public	static String[][]	GetHistoricalValues(String idPeriph) throws IOException, JSONException, SQLException, ParseException
+	public	static String[][]	getHistoricalValues(String idPeriph) throws IOException, JSONException, SQLException, ParseException
 	{
-		String			query		= "";
+		String			query;
 		String[][]		returnValue	= null;
-		String			values		= "";
-		String[]		value_list = null;
+		String			values;
+		String[]		valueList ;
 		
-		query	=	formatQuery(true, actHisto, idPeriph);
+		query	=	formatQuery(true, ACT_HISTO, idPeriph);
 
 	    JSONObject json = readJsonFromUrl(query);
-	    if (json != null)
-	    {
-	    	if (json.getInt("success") == 1)
+	    if ((json != null) &&
+	    	(json.getInt("success") == 1))
+    	{
+		    JSONObject jsonBody = json.getJSONObject("body");
+	    	values = jsonBody.getJSONArray("history").toString();
+	    	values = values.replace("[", "");
+	    	values = values.replace("]", "");
+	    	values = values.replace("\"", "");
+	    	valueList = values.split(",");
+	    	returnValue	= new String[valueList.length/2][2];
+	    	if ((valueList.length > 0) &&
+	    			((valueList.length % 2) == 0))
 	    	{
-			    JSONObject jsonBody = json.getJSONObject("body");
-		    	values = jsonBody.getJSONArray("history").toString();
-		    	values = values.replace("[", "");
-		    	values = values.replace("]", "");
-		    	values = values.replace("\"", "");
-		    	value_list = values.split(",");
-		    	returnValue	= new String[value_list.length/2][2];
-		    	if ((value_list.length > 0) &&
-		    			((value_list.length % 2) == 0))
-		    	{
-			    	for(int i = 0 ; i < value_list.length ; i++)
-		    		{
-		    		// Value itself
-		    		returnValue[i/2][0] = value_list[i].toString();
-		    		i++;
-		    		// Date when it has been pulled out
-		    		returnValue[i/2][1] = value_list[i].toString();
-		    		}
-		    	}
+		    	for(int i = 0 ; i < (valueList.length / 2) ; i++)
+	    		{
+	    		// Value itself
+	    		returnValue[i][0] = valueList[2*i];
+	    		// Date when it has been pulled out
+	    		returnValue[i][1] = valueList[2*i+1];
+	    		}
 	    	}
 	    }
 
@@ -120,13 +120,12 @@ public class DomoticEedomus
 
 	public	static void			logHistoDB(String idPeripherique) throws JSONException, IOException, SQLException, ParseException
 	{
-		String[][]	values	= null;
-		String	temperature	= "";
-		String	dateCollecte	= "";
+		String[][]	values;
+		String	temperature;
+		String	dateCollecte;
 		Date	now;	
 		
-	    values = null;
-	    values = GetHistoricalValues(idPeripherique);
+	    values = getHistoricalValues(idPeripherique);
 	    if (values != null)
 	    {
 		    now	= new Date();
@@ -134,7 +133,7 @@ public class DomoticEedomus
 			{
 				temperature = values[i][0];
 				dateCollecte = values[i][1];
-			    System.out.println("pulled at " + now + " for periph " + idPeripherique + " : " + temperature + " ; " + dateCollecte);
+				LOGGER.info("pulled at " + now + " for periph " + idPeripherique + " : " + temperature + " ; " + dateCollecte);
 			    String sqlInsert = "insert into ttemperature values ('" +
 			    		idPeripherique + "', '" + dateCollecte + "', " + temperature + ") ON CONFLICT DO NOTHING;";
 			    writeRepository(sqlInsert);
@@ -177,9 +176,8 @@ public class DomoticEedomus
 	            timeElapsed = (now.getTime() - lastCall.getTime())/1000;
 	            if (timeElapsed < 2*60)
 	            {
-		            System.out.println("Last call to cloud webservice " + timeElapsed + " second(s) ago.");
-		  	      	JSONObject json = null;
-		  	      	return json;
+	            	LOGGER.warning("Last call to cloud webservice " + timeElapsed + " second(s) ago.");
+		  	      	return null;
 	            }
 	    		
 	    	}
@@ -188,7 +186,7 @@ public class DomoticEedomus
 	    /* Log last call if cloud url pinged */
 	    if (url.indexOf(urlCloud) != -1)
 	    {
-	    	SimpleDateFormat format	= new SimpleDateFormat(stdFormatDate);
+	    	SimpleDateFormat format	= new SimpleDateFormat(FORMAT_DATE);
 	    	if (cDB != null)
 	    	{
 		    	if (createperiph)
@@ -205,92 +203,85 @@ public class DomoticEedomus
 	    try {
 	      BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
 	      String jsonText = readAll(rd);
-	      JSONObject json = new JSONObject(jsonText);
-	      return json;
+	      return new JSONObject(jsonText);
 	    } finally {
 	      is.close();
 	    }
 	  }
 
-	private	static boolean		ConnectRepository(String DBname, String DBuser, String DBpassword) throws IOException, SQLException
+	private	static boolean		connectRepository(String dbName, String dbUser, String dbPassword) throws IOException, SQLException, JSONException
 	{
-		boolean		result	=	false;
+		boolean		result		=	false;
+		boolean		fileExist;
 		
 		try
 		{
-			//Class.forName("org.postgresql.Driver");
-		    cDB = DriverManager.getConnection(DBname, DBuser, DBpassword);
+		    cDB = DriverManager.getConnection(dbName, dbUser, dbPassword);
 		    cDB.setAutoCommit(true);
 		    result	=	true;
 		}
 		catch (SQLException eDB)
 		{
-			System.err.println("Connexion to DB impossible, switching to log file.");
+			LOGGER.warning("Connexion to DB impossible, switching to log file.");
 			cDB = null;
-			try
+		}
+		if (cDB == null)
+		{
+			// Do the script and config file exist? If not create them.
+			fileExist		=	true;
+			File	fConfig	=	new File(configFile);
+			if (!fConfig.exists())
 			{
-				// Do the script and config file exist? If not create them.
-				File	fConfig	=	new File(configFile);
-				if (!fConfig.exists())
+				fileExist = fConfig.createNewFile();
+				if (!fileExist)
 				{
-					fConfig.createNewFile();
+					return fileExist;
 				}
-				else
+			}
+			else
+			{
+		        FileReader	fr = new FileReader(fConfig);
+				if (jsonConfig == null)
 				{
-			        FileReader	fr = new FileReader(fConfig);
-					if ((fr != null) && (jsonConfig == null))
-					{
-						BufferedReader	br		=	new BufferedReader(fr); 
-						String 			line	=	"";
-						String 			config	=	"";
-						
-						while((line = br.readLine()) != null)
-						{ 
-							config	=	config + line; 
-						}
-						jsonConfig = new JSONObject(config);
-						br.close();
-						fr.close();
-					}
-				    result	=	true;
-				}
-				File	fExist	=	new File(localFile);
-				if (!fExist.exists())
-				{
-					fExist.createNewFile();
-				}
-		        FileReader	fr = new FileReader(fExist);
-		        if (fr != null)
-		        {
-		        	setScript	=	new LinkedHashSet();
-					BufferedReader			br			=	new BufferedReader(fr); 
-					String 					line		=	"";
+					BufferedReader	br		=	new BufferedReader(fr); 
+					String 			line;
+					StringBuilder	config	=	new StringBuilder("");
 					
 					while((line = br.readLine()) != null)
 					{ 
-						setScript.add(line); 
+						config.append(line); 
 					}
-				    fr.close();
-		        }
+					jsonConfig = new JSONObject(config.toString());
+					br.close();
+				}
+				fr.close();
+			    result	=	true;
 			}
-			catch (Exception eFile)
+			File	fExist	=	new File(localFile);
+			if (!fExist.exists())
 			{
-				eFile.printStackTrace();
-				System.err.println(eFile.getClass().getName()+": "+eFile.getMessage());
-				System.exit(0);
+				fileExist = fExist.createNewFile();
 			}
-		}
-		catch (Exception eGenerale)
-		{
-			eGenerale.printStackTrace();
-			System.err.println(eGenerale.getClass().getName()+": "+eGenerale.getMessage());
-			System.exit(0);
+			if (!fileExist)
+			{
+				return false;
+			}
+	        FileReader	fr = new FileReader(fExist);
+        	setScript	=	new LinkedHashSet();
+			BufferedReader		br		=	new BufferedReader(fr); 
+			String 				line;
+			
+			while((line = br.readLine()) != null)
+			{ 
+				setScript.add(line); 
+			}
+		    fr.close();
 		}
 		  
 		return result;
 	}
 	
-	private	static boolean		DisconnectRepository() throws IOException, SQLException, JSONException
+	private	static boolean		disconnectRepository() throws IOException, SQLException, JSONException
 	{
 	    boolean	result	= true;
 	      
@@ -306,23 +297,20 @@ public class DomoticEedomus
 				File	fConfig	=	new File(configFile);
 			    Date	now		=	new Date();
 		        FileWriter	fw = new FileWriter(fConfig, false);
-		    	SimpleDateFormat format	= new SimpleDateFormat(stdFormatDate);
-		        jsonConfig.put("lastcall", format.format(now)); 
+		    	SimpleDateFormat format	= new SimpleDateFormat(FORMAT_DATE);
+		        jsonConfig.put(LAST_CALL, format.format(now)); 
 		    	fw.write(jsonConfig + fileNewLine);
 			    fw.close();
 		    }
 		    /* Save the SQL script */
 			File	fScript	=	new File(localFile);
 	        FileWriter fw = new FileWriter(fScript);
-	        if (fw != null)
-	        {
-	        	Iterator	lineScript	=	setScript.iterator();
-	        	while (lineScript.hasNext())
-	        	{
-			    	fw.write(lineScript.next() + fileNewLine);
-	        	}
-				fw.close();
-	        }
+        	Iterator	lineScript	=	setScript.iterator();
+        	while (lineScript.hasNext())
+        	{
+		    	fw.write(lineScript.next() + fileNewLine);
+        	}
+			fw.close();
 	    }
 	    
 	    return result;
@@ -332,7 +320,7 @@ public class DomoticEedomus
 	{
 	      if (cDB != null)
 	      {
-	    	  Statement		stmt	=	null;
+	    	  Statement		stmt;
 	    	  
 			  stmt	=	cDB.createStatement();
 			  stmt.executeUpdate(sqlQuery);
@@ -365,8 +353,11 @@ public class DomoticEedomus
 		    }
 		    finally
 		    {
-		        if (rs != null)		{ rs.close();}
-		        if (stmt != null)	{ stmt.close();}
+		    	if (rs != null)
+		    	{
+		        	rs.close();
+		    	}
+	        	stmt.close();
 		    }
 			
 		}
@@ -394,20 +385,23 @@ public class DomoticEedomus
 		    	rs = stmt.executeQuery(sqlSelect);
 		        if (rs.next())
 		        {
-		        	lastCall = rs.getTimestamp("lastcall");
+		        	lastCall = rs.getTimestamp(LAST_CALL);
 		        }
 		    }
 		    finally
 		    {
-		        if (rs != null)		{ rs.close();}
-		        if (stmt != null)	{ stmt.close();}
+		    	if (rs != null)
+		    	{
+		        	rs.close();
+		    	}
+	        	stmt.close();
 		    }
 			
 		}
 		else if (jsonConfig != null)
 		{
-			sdf				= new SimpleDateFormat(stdFormatDate);
-			lastCall		= sdf.parse(jsonConfig.getString("lastcall"));
+			sdf				= new SimpleDateFormat(FORMAT_DATE);
+			lastCall		= sdf.parse(jsonConfig.getString(LAST_CALL));
 		}
 		
 		return lastCall;
@@ -415,27 +409,29 @@ public class DomoticEedomus
 	
 	public static void			main(String[] args) throws IOException, JSONException, SQLException, InterruptedException, ParseException
 	{
-		String 			DBname			= "";
-		String 			DBuser			= "";
-		String 			DBpassword		= "";
+		String 			dbName;
+		String 			dbUser;
+		String 			dbPassword;
+		String 			idInternalTemp;
+		String 			idExternalTemp;
+		String 			idConsoPower;
+
 		/* Requires 3 mandatory params :
 		 * 		- name of the DB (only postgreSQL at this stage)
 		 * 		- user name
 		 * 		- password
 		 * In case there are not provided, a script will be written as output  
 		 */
-		DBname			=	args[0];
-		DBuser			=	args[1];
-		DBpassword		=	args[2];
-		if ((DBname == "") && (DBuser == "") && (DBpassword == ""))
+		dbName			=	args[0];
+		dbUser			=	args[1];
+		dbPassword		=	args[2];
+		if ((dbName == "") && (dbUser == "") && (dbPassword == ""))
 		{
-			DBname			= "*";
-			DBuser			= "*";
-			DBpassword		= "*";
-			
+			dbName			= "*";
+			dbUser			= "*";
 		}
 		/* Load config */
-		if (ConnectRepository(DBname, DBuser, DBpassword))
+		if (connectRepository(dbName, dbUser, dbPassword))
 		{
 			urlLocal		=	getConfigFromRepository("urlLocal");
 			urlCloud		=	getConfigFromRepository("urlCloud");
@@ -456,11 +452,11 @@ public class DomoticEedomus
 		    Thread.sleep(500);
 		    logHistoDB(idConsoPower);
 
-		    DisconnectRepository();
+		    disconnectRepository();
 		}
 		else
 		{
-			System.out.println("Connexion failed");
+			LOGGER.info("Connexion failed");
 		}
 
 	}
