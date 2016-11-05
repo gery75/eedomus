@@ -94,6 +94,7 @@ public class DomoticEedomus {
 		}
 		catch (IOException | JSONException | SQLException | ParseException excp)
 		{
+			LOGGER.warning(excp.getMessage());
 			throw new DomoticException(DOMOTIC_ERR_MSG, excp);
 		}
 
@@ -121,7 +122,8 @@ public class DomoticEedomus {
 		}
 		catch (IOException | JSONException | SQLException | ParseException excp)
 		{
-			excp.printStackTrace();
+			LOGGER.warning(excp.getMessage());
+			throw new DomoticException(DOMOTIC_ERR_MSG, excp);
 		}
 
 		return returnValue;
@@ -152,6 +154,7 @@ public class DomoticEedomus {
 		}
 		catch (IOException | SQLException excp)
 		{
+			LOGGER.warning(excp.getMessage());
 			throw new DomoticException(DOMOTIC_ERR_MSG, excp);
 		}
 
